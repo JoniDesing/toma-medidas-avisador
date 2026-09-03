@@ -102,7 +102,7 @@ async function revisarYAvisar(env, forzar) {
     if (rows.length) {
       const nombres = rows.map((r) => `${r.cliente_nombre || ''} ${r.cliente_apellido || ''}`.trim()).join(', ');
       log.agendados_hoy.envio = await enviarATodos(env, {
-        title: '📐 Toma de medidas hoy',
+        title: '🎾 Hay cosas que hacer hoy, NADA DE PADEL!',
         body: rows.length === 1 ? `Hoy tenés que tomar medidas en lo de ${nombres}` : `Hoy tenés ${rows.length} visitas agendadas: ${nombres}`,
         url: './',
       });
@@ -188,8 +188,8 @@ export default {
       const nombre = (body.nombre || 'un cliente').trim() || 'un cliente';
       try {
         const envio = await enviarATodos(env, {
-          title: '🆕 Nueva toma de medidas pendiente',
-          body: `Se cargó un pedido para ${nombre}`,
+          title: '👑 Tenés laburo Rey',
+          body: `Se cargó un pedido de medidas para ${nombre}`,
           url: './',
         });
         return new Response(JSON.stringify({ ok: true, envio }), { headers: { 'Content-Type': 'application/json' } });
