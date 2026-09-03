@@ -11,6 +11,12 @@ import { buildPushPayload } from '@block65/webcrypto-web-push';
 
 const SUPABASE_URL = 'https://ddvrhrmcswmtovawsjig.supabase.co';
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, x-app-token',
+};
+
 function sbHeaders(env) {
   return {
     apikey: env.SUPABASE_KEY,
@@ -120,7 +126,7 @@ async function revisarYAvisar(env, forzar) {
     log.pendientes_atrasados = { encontrados: rows.length };
     if (rows.length) {
       log.pendientes_atrasados.envio = await enviarATodos(env, {
-        title: '¿ANDÁS SIN GANAS DE LABURAR?',
+        title: '😤ANDÁS SIN GANAS DE LABURAR?',
         body: 'SOLTÁ EL PADEL, TENÉS MEDIDAS PENDIENTES DE TOMAR',
         url: './',
       });
@@ -146,10 +152,15 @@ export default {
       try {
         const forzar = url.searchParams.get('forzar') === '1';
         const resultado = await revisarYAvisar(env, forzar);
-        return new Response(JSON.stringify(resultado, null, 2), { headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify(resultado, null, 2), { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
       } catch (e) {
-        return new Response('ERROR: ' + String(e), { status: 500 });
+        return new Response('ERROR: ' + String(e), { status: 500, headers: CORS_HEADERS });
       }
+    }
+
+    // Permite que el navegador (desde otro dominio) le pida permiso al worker antes de mandar el POST real
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: CORS_HEADERS });
     }
 
     // Diagnóstico: confirma que las claves están cargadas y que se puede hablar con Supabase,
@@ -173,7 +184,7 @@ export default {
         error = String(e);
       }
       return new Response(JSON.stringify({ claves, supabaseOk, suscripciones, error }, null, 2), {
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
       });
     }
 
@@ -181,7 +192,7 @@ export default {
     // (no espera al chequeo diario). Requiere el token compartido para evitar spam.
     if (url.pathname === '/aviso-nuevo-pedido' && request.method === 'POST') {
       if (request.headers.get('x-app-token') !== env.NOTIF_TOKEN) {
-        return new Response('No autorizado', { status: 401 });
+        return new Response('No autorizado', { status: 401, headers: CORS_HEADERS });
       }
       let body = {};
       try { body = await request.json(); } catch (e) {}
@@ -192,12 +203,12 @@ export default {
           body: `Se cargó un pedido de medidas para ${nombre}`,
           url: './',
         });
-        return new Response(JSON.stringify({ ok: true, envio }), { headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ ok: true, envio }), { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
       } catch (e) {
-        return new Response('ERROR: ' + String(e), { status: 500 });
+        return new Response('ERROR: ' + String(e), { status: 500, headers: CORS_HEADERS });
       }
     }
 
-    return new Response('Toma de Medidas — avisador. Este worker corre solo, no hace falta visitarlo.');
+    return new Response('Toma de Medidas — avisador. Este worker corre solo, no hace falta visitarlo.', { headers: CORS_HEADERS });
   },
 };
