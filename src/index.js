@@ -25,35 +25,39 @@ function hoyArgentina() {
   return ahora.toISOString().slice(0, 10);
 }
 
+async function sbFetch(env, path, options) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: { ...sbHeaders(env), ...(options?.headers || {}) },
+  });
+  if (!res.ok) {
+    const texto = await res.text().catch(() => '');
+    throw new Error(`Supabase ${res.status} en ${path}: ${texto}`);
+  }
+  return res;
+}
+
 async function yaAvisadoHoy(env, tipo, fecha) {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/push_log?fecha=eq.${fecha}&tipo=eq.${tipo}&select=id`,
-    { headers: sbHeaders(env) }
-  );
+  const res = await sbFetch(env, `push_log?fecha=eq.${fecha}&tipo=eq.${tipo}&select=id`);
   const rows = await res.json();
   return rows.length > 0;
 }
 
 async function marcarAvisadoHoy(env, tipo, fecha) {
-  await fetch(`${SUPABASE_URL}/rest/v1/push_log`, {
+  await sbFetch(env, `push_log`, {
     method: 'POST',
-    headers: { ...sbHeaders(env), Prefer: 'resolution=merge-duplicates,return=minimal' },
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify({ fecha, tipo }),
   });
 }
 
 async function obtenerSuscripciones(env) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?select=*`, {
-    headers: sbHeaders(env),
-  });
+  const res = await sbFetch(env, `push_subscriptions?select=*`);
   return res.json();
 }
 
 async function eliminarSuscripcion(env, endpoint) {
-  await fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`, {
-    method: 'DELETE',
-    headers: sbHeaders(env),
-  });
+  await sbFetch(env, `push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`, { method: 'DELETE' });
 }
 
 async function enviarATodos(env, payload) {
@@ -64,6 +68,7 @@ async function enviarATodos(env, payload) {
     privateKey: env.VAPID_PRIVATE_KEY,
   };
 
+  const resultados = [];
   await Promise.all(
     subs.map(async (s) => {
       const subscription = {
@@ -73,67 +78,103 @@ async function enviarATodos(env, payload) {
       try {
         const message = await buildPushPayload({ data: JSON.stringify(payload) }, subscription, vapid);
         const res = await fetch(subscription.endpoint, message);
+        resultados.push({ endpoint: s.endpoint.slice(-12), status: res.status });
         if (res.status === 404 || res.status === 410) {
           await eliminarSuscripcion(env, s.endpoint); // suscripción vencida, la limpiamos
         }
       } catch (e) {
-        console.error('Error enviando push:', e);
+        resultados.push({ endpoint: s.endpoint.slice(-12), error: String(e) });
       }
     })
   );
+  return resultados;
 }
 
-async function revisarYAvisar(env) {
+async function revisarYAvisar(env, forzar) {
   const fecha = hoyArgentina();
+  const log = { fecha, agendados_hoy: null, pendientes_atrasados: null };
 
   // 1) Visitas agendadas para hoy
-  if (!(await yaAvisadoHoy(env, 'agendados_hoy', fecha))) {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/tomas_medidas?estado=eq.agendado&fecha_agendada=eq.${fecha}&eliminado=eq.false&select=cliente_nombre,cliente_apellido`,
-      { headers: sbHeaders(env) }
-    );
+  if (forzar || !(await yaAvisadoHoy(env, 'agendados_hoy', fecha))) {
+    const res = await sbFetch(env, `tomas_medidas?estado=eq.agendado&fecha_agendada=eq.${fecha}&eliminado=eq.false&select=cliente_nombre,cliente_apellido`);
     const rows = await res.json();
+    log.agendados_hoy = { encontrados: rows.length };
     if (rows.length) {
       const nombres = rows.map((r) => `${r.cliente_nombre || ''} ${r.cliente_apellido || ''}`.trim()).join(', ');
-      await enviarATodos(env, {
+      log.agendados_hoy.envio = await enviarATodos(env, {
         title: '📐 Toma de medidas hoy',
         body: rows.length === 1 ? `Hoy tenés que tomar medidas en lo de ${nombres}` : `Hoy tenés ${rows.length} visitas agendadas: ${nombres}`,
         url: './',
       });
     }
-    await marcarAvisadoHoy(env, 'agendados_hoy', fecha);
+    if (!forzar) await marcarAvisadoHoy(env, 'agendados_hoy', fecha);
+  } else {
+    log.agendados_hoy = { yaAvisado: true };
   }
 
   // 2) Pedidos pendientes (sin agendar) hace más de 2 días
-  if (!(await yaAvisadoHoy(env, 'pendientes_atrasados', fecha))) {
+  if (forzar || !(await yaAvisadoHoy(env, 'pendientes_atrasados', fecha))) {
     const limite = new Date(Date.now() - 3 * 60 * 60 * 1000 - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/tomas_medidas?estado=eq.pendiente&fecha_pedido=lte.${limite}&eliminado=eq.false&select=cliente_nombre`,
-      { headers: sbHeaders(env) }
-    );
+    const res = await sbFetch(env, `tomas_medidas?estado=eq.pendiente&fecha_pedido=lte.${limite}&eliminado=eq.false&select=cliente_nombre`);
     const rows = await res.json();
+    log.pendientes_atrasados = { encontrados: rows.length };
     if (rows.length) {
-      await enviarATodos(env, {
+      log.pendientes_atrasados.envio = await enviarATodos(env, {
         title: '😤 ¿ANDÁS SIN GANAS DE LABURAR?',
         body: 'SOLTÁ EL PADEL, TENÉS MEDIDAS PENDIENTES DE TOMAR',
         url: './',
       });
     }
-    await marcarAvisadoHoy(env, 'pendientes_atrasados', fecha);
+    if (!forzar) await marcarAvisadoHoy(env, 'pendientes_atrasados', fecha);
+  } else {
+    log.pendientes_atrasados = { yaAvisado: true };
   }
+
+  return log;
 }
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(revisarYAvisar(env));
+    ctx.waitUntil(revisarYAvisar(env, false));
   },
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Permite forzar una revisión manual visitando la URL del worker (útil para probar)
+    // Permite forzar una revisión manual visitando la URL del worker (útil para probar).
+    // ?forzar=1 ignora si ya se avisó hoy y reenvía igual (solo para pruebas).
     if (url.pathname === '/revisar-ahora') {
-      await revisarYAvisar(env);
-      return new Response('OK — revisado');
+      try {
+        const forzar = url.searchParams.get('forzar') === '1';
+        const resultado = await revisarYAvisar(env, forzar);
+        return new Response(JSON.stringify(resultado, null, 2), { headers: { 'Content-Type': 'application/json' } });
+      } catch (e) {
+        return new Response('ERROR: ' + String(e), { status: 500 });
+      }
+    }
+
+    // Diagnóstico: confirma que las claves están cargadas y que se puede hablar con Supabase,
+    // sin mandar ninguna notificación.
+    if (url.pathname === '/diagnostico') {
+      const claves = {
+        SUPABASE_KEY: !!env.SUPABASE_KEY,
+        VAPID_PUBLIC_KEY: !!env.VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY: !!env.VAPID_PRIVATE_KEY,
+        NOTIF_TOKEN: !!env.NOTIF_TOKEN,
+      };
+      let supabaseOk = false;
+      let suscripciones = null;
+      let error = null;
+      try {
+        const res = await sbFetch(env, 'push_subscriptions?select=id');
+        const rows = await res.json();
+        supabaseOk = true;
+        suscripciones = rows.length;
+      } catch (e) {
+        error = String(e);
+      }
+      return new Response(JSON.stringify({ claves, supabaseOk, suscripciones, error }, null, 2), {
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     // La app llama a esto apenas se guarda un pedido nuevo, para avisar al instante
@@ -145,12 +186,16 @@ export default {
       let body = {};
       try { body = await request.json(); } catch (e) {}
       const nombre = (body.nombre || 'un cliente').trim() || 'un cliente';
-      await enviarATodos(env, {
-        title: '🆕 Nueva toma de medidas pendiente',
-        body: `Se cargó un pedido para ${nombre}`,
-        url: './',
-      });
-      return new Response('OK — avisado');
+      try {
+        const envio = await enviarATodos(env, {
+          title: '🆕 Nueva toma de medidas pendiente',
+          body: `Se cargó un pedido para ${nombre}`,
+          url: './',
+        });
+        return new Response(JSON.stringify({ ok: true, envio }), { headers: { 'Content-Type': 'application/json' } });
+      } catch (e) {
+        return new Response('ERROR: ' + String(e), { status: 500 });
+      }
     }
 
     return new Response('Toma de Medidas — avisador. Este worker corre solo, no hace falta visitarlo.');
