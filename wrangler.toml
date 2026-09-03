@@ -1,0 +1,10 @@
+name = "toma-medidas-avisador"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Corre todos los días a las 11:00 UTC = 08:00 en Argentina (UTC-3, sin horario de verano)
+[triggers]
+crons = ["0 11 * * *"]
+
+# Las claves reales se cargan como secretos (wrangler secret put), NO se escriben acá.
+# Ver instrucciones de despliegue.
