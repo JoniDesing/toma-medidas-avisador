@@ -120,7 +120,7 @@ async function revisarYAvisar(env, forzar) {
     log.pendientes_atrasados = { encontrados: rows.length };
     if (rows.length) {
       log.pendientes_atrasados.envio = await enviarATodos(env, {
-        title: '😤 ¿ANDÁS SIN GANAS DE LABURAR?',
+        title: '¿ANDÁS SIN GANAS DE LABURAR?',
         body: 'SOLTÁ EL PADEL, TENÉS MEDIDAS PENDIENTES DE TOMAR',
         url: './',
       });
