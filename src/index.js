@@ -102,14 +102,18 @@ async function revisarYAvisar(env, forzar) {
 
   // 1) Visitas agendadas para hoy
   if (forzar || !(await yaAvisadoHoy(env, 'agendados_hoy', fecha))) {
-    const res = await sbFetch(env, `tomas_medidas?estado=eq.agendado&fecha_agendada=eq.${fecha}&eliminado=eq.false&select=cliente_nombre,cliente_apellido`);
+    const res = await sbFetch(env, `tomas_medidas?estado=eq.agendado&fecha_agendada=eq.${fecha}&eliminado=eq.false&select=cliente_nombre,cliente_apellido,hora_agendada&order=hora_agendada.asc.nullslast`);
     const rows = await res.json();
     log.agendados_hoy = { encontrados: rows.length };
     if (rows.length) {
-      const nombres = rows.map((r) => `${r.cliente_nombre || ''} ${r.cliente_apellido || ''}`.trim()).join(', ');
+      const conNombreYHora = rows.map((r) => {
+        const nombre = `${r.cliente_nombre || ''} ${r.cliente_apellido || ''}`.trim();
+        return r.hora_agendada ? `${nombre} (${r.hora_agendada.slice(0, 5)}hs)` : nombre;
+      });
+      const lista = conNombreYHora.join(', ');
       log.agendados_hoy.envio = await enviarATodos(env, {
         title: '🎾 Hay cosas que hacer hoy, NADA DE PADEL!',
-        body: rows.length === 1 ? `Hoy tenés que tomar medidas en lo de ${nombres}` : `Hoy tenés ${rows.length} visitas agendadas: ${nombres}`,
+        body: rows.length === 1 ? `Hoy tenés que tomar medidas en lo de ${lista}` : `Hoy tenés ${rows.length} visitas agendadas: ${lista}`,
         url: './',
       });
     }
@@ -126,7 +130,7 @@ async function revisarYAvisar(env, forzar) {
     log.pendientes_atrasados = { encontrados: rows.length };
     if (rows.length) {
       log.pendientes_atrasados.envio = await enviarATodos(env, {
-        title: '😤ANDÁS SIN GANAS DE LABURAR?',
+        title: '😤 ¿ANDÁS SIN GANAS DE LABURAR?',
         body: 'SOLTÁ EL PADEL, TENÉS MEDIDAS PENDIENTES DE TOMAR',
         url: './',
       });
